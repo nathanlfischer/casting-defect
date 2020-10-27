@@ -1,0 +1,228 @@
+---
+title: "PH125.9x Data Science: Capstone - Casting Defect Detection"
+author: "Nathan Fischer"
+date: "10/15/2020"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE)
+knitr::opts_chunk$set(echo = TRUE)
+if(!require(tidyverse)) install.packages("tidyverse", repos = "http://cran.us.r-project.org")
+if(!require(caret)) install.packages("caret", repos = "http://cran.us.r-project.org")
+if(!require(imager)) install.packages("imager", repos = "http://cran.us.r-project.org")
+if(!require(matrixStats)) install.packages("matrixStats", repos = "http://cran.us.r-project.org")
+if(!require(randomForest)) install.packages("randomForest", repos = "http://cran.us.r-project.org")
+if(!require(doParallel)) install.packages("doParallel", repos = "http://cran.us.r-project.org")
+if(!require(purrr)) install.packages("doParallel", repos = "http://cran.us.r-project.org")
+if(!require(gbm)) install.packages("gbm", repos = "http://cran.us.r-project.org")
+if(!require(naivebayes)) install.packages("naivebayes", repos = "http://cran.us.r-project.org")
+if(!require(MASS)) install.packages("MASS", repos = "http://cran.us.r-project.org")
+if(!require(plyr)) install.packages("plyr", repos = "http://cran.us.r-project.org")
+if(!require(knitr)) install.packages("knitr", repos = "http://cran.us.r-project.org")
+
+library(tidyverse)
+library(caret)
+library(imager)
+library(matrixStats)
+library(randomForest)
+library(doParallel)
+library(purrr)
+library(gbm)
+library(naivebayes)
+library(MASS)
+library(plyr)
+library(knitr)
+```
+
+# Introduction
+
+**describes the dataset and variables, and summarizes the goal of the project and key steps that were performed
+
+Metal casting is a manufacturing process for producing near-net shaped metallic products by pouring molten metal into a shaped, evacuated mold. The molten metal is allowed to solidfy inside the mold, taking the shape produced by the mold. It has a wide range of applications, including jewelry, consumer products, electronic components, and aerospace. Castings are chosen over machined wrought products, such as extrusion or plate, in instances where a complex geometry makes subtractive machining operations prohibitively expensive, or impossible. One of the stigmas associated with castings is that they are perceived to be of lower quality than wrought products, due to the inherent variability associated with the process. An example of this in aviation is 14 CFR 25.621, which requires the use of casting factors for the analysis and certification of transport category aircraft. 
+
+Due to this inherent variability, castings are evaluated using destrutive and non-destructive methods during the manufacturing process. This can include visual, penetrant, magnetic particle, or x-ray inspection techniques. The most common non-destructive inspection technique across all industries using castings is a visual inspection. This requires a human operator to purposefully inspect the castings for defects such as cracks, seams, porosity, inclusions, or areas where the mold did not completely fill. This can generally be done successfully when only a few castings require inspection, or the defects are sufficiently large. As the number of castings being inspected increases, or the size of the defect decreases, the probability of detecting these defects using visual inspection decreases. This study proposes the use of a machine learning algorithm to classify images of castings as acceptable or unacceptable - pass or fail - in lieu of human visual inspection.
+
+The images used in this study are taken from the Kaggle dataset ["casting product image data for quality inspection"](https://www.kaggle.com/ravirajsinh45/real-life-industrial-dataset-of-casting-product). It contains 7,348 images of submersible pump impellers, an industrial version of the "sump pump" which keeps basements from flooding during heavy rain. The images have already been classified by a human operator as either "defective" or "ok". In this study, the images will be imported into R and convereted into a format suitable for classification algorithms. The data will then receive some pre-processing before being evaluated using several algorithms. The most promising algorithms will then be selected for parameter optimization and final comparison.
+
+
+# Analysis
+
+**explains the process and techniques used, including data cleaning, data exploration and visualization, insights gained, and your modeling approaches (you must use at least two different models or algorithms)
+
+## Importing the Data
+
+The initial step is to download the Kaggle dataset and save it in a folder called _data_. For convenience, a copy of the dataset is saved in the associated ["GitHub repository"](https://github.com/nlfischer195/casting-defect). The dataset has already been split into _test_ and _train_ folders, with images placed in either the _def_front_ or _ok_front_ sub-folders. To obtain an understanding of a typical image in the dataset, the following code was used:
+
+```{r}
+image <- load.image("data/test/ok_front/cast_ok_0_10.jpeg")
+dim(image)
+image
+plot(image, axes = false)
+```
+
+From this, it is discovered that the images are 300 x 300 pixel images in color of the impeller casting. It is suprising that the image that three color channels (RGB), as the image appears to be greyscale.
+
+To import these images, a function was developed to create a list of all images in a particular folder, convert each image into greyscale, and then scale down each image to 10% of the original resolution, that is, 30 x 30 pixels instead of the original 300 x 300 pixels, for ease of modeling. Each image is converted into a row of numeric values between 0 and 1 for each pixel in the image. Each row is then added to a matrix, where each row represents a separate image in the dataset.
+
+```{r}
+scale=0.10
+get_image_matrix <- function(path,scale){
+    files <- list.files(path=path, pattern=".jpeg",all.files=T, full.names=T, no.. = T) 
+    list_of_images <- map(files, function(.x){
+      image <- load.image(.x)
+      grey_image <- grayscale(image)
+      grey_image_small <- imresize(grey_image,scale=scale)
+    })
+    image_matrix = do.call('rbind', map(list_of_images, as.numeric))
+    return(image_matrix)
+}
+```
+
+To import the test dataset, the **get_image_matrix** function is applied to both the _ok_front_ and _def_front_ sub-folders within _test_. In order to create a corresponding dependent variable, an array of the text "pass" with the same number of entries as the number of rows in the matrix created by the **get_image_matrix** function applied to the _ok_front_ folder was created. A similar array of the text "fail" was created for the matrix corresponding to the _def_front_ folder. The pass and fail matrices are then joined together to create a single test input matrix, while the arrays of "pass" and "fail" are also joined and turned into a factor.
+
+```{r}
+x_test_pass <- get_image_matrix(path="data/test/ok_front",scale=scale)
+y_test_pass <- array(data=rep.int("pass",nrow(x_test_pass)))
+
+x_test_fail <- get_image_matrix(path="data/test/def_front",scale=scale)
+y_test_fail <- array(data=rep.int("fail",nrow(x_test_fail)))
+
+x_test <- rbind(x_test_pass,x_test_fail)
+y_test <- factor(array(c(y_test_pass,y_test_fail)))
+
+```
+
+To import the train dataset, a similar process is used.
+
+```{r}
+x_train_pass <- get_image_matrix(path="data/train/ok_front",scale=scale)
+y_train_pass <- array(data=rep.int("pass",nrow(x_train_pass)))
+
+x_train_fail <- get_image_matrix(path="data/train/def_front",scale=scale)
+y_train_fail <- array(data=rep.int("fail",nrow(x_train_fail)))
+
+x_train <- rbind(x_train_pass,x_train_fail)
+y_train <- factor(array(c(y_train_pass,y_train_fail)))
+```
+
+After importing the data is complete, it is important to verify that it was imported properly.
+
+```{r}
+dim(x_train_pass)
+dim(x_train_fail)
+dim(x_train)
+str(x_train)
+
+length(y_train)
+str(y_train)
+table(y_train)
+```
+
+Importing the data appears to be successful. The number of columns in x_train_pass, x_train_fail, and x_train all match and the number of rows in x_train is the sum of the number of rows in x_train_pass and x_train_fail. The number of rows in x_train also matches the number of rows in y_train, which was correctly imported as a factor with two levels, with the first being "fail" and the second being "pass". The number of "fail" entries in y_train matches the number of rows in x_train_fail and the number of "pass" entries matches the number of rows in x_train_pass.
+
+The final check before progressing onto pre-processing is to view an original image and visually compare it to the same image after being imported and resized.
+
+```{r}
+image <- load.image("data/test/ok_front/cast_ok_0_10.jpeg")
+plot(image, axes=FALSE)
+
+image_dim <- sqrt(ncol(x_train_pass))
+new_image <- matrix(data=x_test_pass[1,],nrow=image_dim,ncol=image_dim,byrow=TRUE)
+new_image <- t(new_image)
+par(mar = rep(0, 4),pty="s")
+image(new_image[,nrow(new_image):1], axes = FALSE, col = grey(seq(0, 1, length = 256)))
+
+```
+
+It can be seen that the imported version of this image can be identifed as the same impeller, with matching locations of shadowing, except the imported version is a lower resolution image. All of these results provide confidence that the image importing technique used in this study was successful.
+
+## Pre-Processing
+
+Pre-processing is the term used for data transformations performed on the dataset prior to using classification or regression algorithms. Common technniques include centering and scaling the data, entering missing data points, transforming predictors, or creating dummy variables for categorical data. These steps are performed for various reasons, including to improve accuracy, reduce runtime, or even to allow the algorithm to function at all.
+
+For this image-based dataset, a useful pre-processing step is to remove any predictors - columns - in the dataset that have zero or near-zero variance. This correlates to locations in the images which are nearly identical and therefore do not provide any useful data regarding the acceptability of a casting. A plot of the standard deviations of the columns of the training dataset is creatd using the following code.
+
+```{r}
+sds <- colSds(x_train)
+qplot(sds, bins = 256, color = I("black"))
+```
+
+Visually, there does not appear to be any predictors with near zero variance. To verify this, the **nearZeroVar** function is used, with an image created to show the locations in the image dataset identified as having near zero variance.
+
+```{r}
+nzv <- nearZeroVar(x_train)
+image(matrix(1:ncol(x_train) %in% nzv, image_dim, image_dim))
+col_index <- setdiff(1:ncol(x_train), nzv)
+length(col_index)
+```
+
+The image produced is blank and the number of items in col_index (1369) matches the number of columns in the original dataset. The results of using the **nearZeroVar** function matches the visual observation from the plot of column standard deviations, that is, all of the predictors are providing useful information for classifying the images. Even though all of the columns were included in col_index, the index will continue to be used in the present study, as future work that increases the resolution of the imported images from the current ten percent may find removing predictors with near zero variance valuable.
+
+The final pre-processing step is to add column names to the dataset, as required by the **caret** function.
+
+```{r}
+colnames(x_train) <- 1:ncol(x_train)
+colnames(x_test) <- colnames(x_train)
+```
+
+
+## Model Selection
+
+To select which models to use for parameter optimization, several common models will be fit to the dataset using default parameters. This will include Naive Bayes, Quadratic Discriminant Analysis, Linear Discriminant Analysis, Stochastic Gradient Boosting, k-Nearest Neighbors, Random Forest, and eXtreme Gradient Boosting. To minimize processing time, two-fold cross validation will be used.
+
+```{r}
+models <- c("naive_bayes","qda","lda","gbm","knn","rf","xgbDART")
+set.seed(1, sample.kind = "Rounding")
+control <- trainControl(method = "cv", number = 2, p = 0.8)
+cl <- makePSOCKcluster(detectCores())
+registerDoParallel(cl)
+fits <- map_df(models, function(model){ 
+  print(model)
+  ptm <- proc.time()
+  fit<-train(x = x_train[, col_index],y = y_train, method = model, trControl = control)
+  ptm <- proc.time() - ptm
+  tibble(model=model, time=ptm[[3]], min=min(fit$results$Accuracy),max=max(fit$results$Accuracy),avg=mean(fit$results$Accuracy))
+}) 
+stopCluster(cl)
+```
+
+
+
+## Stochastic Gradient Boosting Model
+
+
+
+## K-Nearest Neighbors Model
+
+
+## Random Forest Model
+
+
+# Results
+
+**presents the modeling results and discusses the model performance
+
+# Conclusion
+
+** brief summary of the report, its potential impact, its limitations, and future work
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r cars}
+summary(cars)
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+plot(pressure)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
