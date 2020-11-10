@@ -105,6 +105,7 @@ plot(image, axes=FALSE)
 #Check columns for zero variability
 sds <- colSds(x_train)
 qplot(sds, bins = 256, color = I("black"))
+
 #caret function for near zero variance
 nzv <- nearZeroVar(x_train)
 image(matrix(1:ncol(x_train) %in% nzv, image_dim, image_dim))
@@ -120,17 +121,24 @@ colnames(x_test) <- colnames(x_train)
 ######### Fit several models and then select the best ones #######
 models <- c("naive_bayes","qda","lda","gbm","knn","rf","xgbDART")
 set.seed(1, sample.kind = "Rounding")
+# 2-fold cross-validation to minimize computation time
 control <- trainControl(method = "cv", number = 2, p = 0.8)
+#use multiple CPU cores to reduce processing time
 cl <- makePSOCKcluster(detectCores())
 registerDoParallel(cl)
+# map_df to loop through models
 fits <- map_df(models, function(model){ 
   print(model)
+  #initial timestamp
   ptm <- proc.time()
   fit<-train(x = x_train[, col_index],y = y_train, method = model, trControl = control)
+  #second timestamp - find difference
   ptm <- proc.time() - ptm
+  #create tibble with model name, processing time, min, max, and avg accuracy
   tibble(model=model, time=ptm[[3]], min=min(fit$results$Accuracy),max=max(fit$results$Accuracy),avg=mean(fit$results$Accuracy))
 }) 
 stopCluster(cl)
+#output results of group of models
 fits %>% arrange(desc(avg)) %>% kable()
 
 #top four models are rf, knn, xgbDART, and gbm
@@ -142,8 +150,10 @@ fits %>% arrange(desc(avg)) %>% kable()
 
 ###################### GBM Model ##################################
 #prediction using bootstrap to determine parameters
+#use multiple CPU cores to reduce processing time
 cl <- makePSOCKcluster(detectCores())
 registerDoParallel(cl)
+set.seed(1, sample.kind = "Rounding")
 control <- trainControl(method = "boot", number = 10, classProbs=TRUE, summaryFunction = twoClassSummary)
 tune <- expand.grid(interaction.depth=c(3,5,7), n.trees=c(100,500), shrinkage=c(0.1), n.minobsinnode=10)
 ptm <- proc.time()
@@ -154,8 +164,9 @@ train_gbm <- train(x_train[, col_index], y_train,
                    trControl = control)
 proc.time() - ptm
 stopCluster(cl)
+#plot effect of parameters
 ggplot(train_gbm)
-train_gbm$bestTune
+train_gbm$bestTune %>% kable()
 
 #predict test data using optimized parameters
 y_hat_gbm <- predict(train_gbm, 
@@ -175,10 +186,12 @@ results <- tibble(Method="GBM",
 ###################################################################
 
 ###################### KNN Model ##################################
-#prediction using cross validation to determine # neighbors
+#prediction using bootstrap to determine parameters
+#use multiple CPU cores to reduce processing time
 cl <- makePSOCKcluster(detectCores())
 registerDoParallel(cl)
 ptm <- proc.time()
+set.seed(1, sample.kind = "Rounding")
 control <- trainControl(method = "boot", number = 10, classProbs=TRUE, summaryFunction = twoClassSummary)
 train_knn <- train(x_train[, col_index], y_train,
                    method = "knn", 
@@ -187,8 +200,9 @@ train_knn <- train(x_train[, col_index], y_train,
                    trControl = control)
 proc.time() - ptm
 stopCluster(cl)
+#plot effect of parameters
 ggplot(train_knn)
-train_knn$bestTune
+train_knn$bestTune %>% kable()
 
 #fit model using optimized nearest neighbors
 y_hat_knn <- predict(train_knn, 
@@ -206,7 +220,9 @@ results <- bind_rows(results,
 ##################################################################
 
 #################### Random Forest Model #########################
-#fit model using cross-validation to tune parameters
+#not included in edX report for brevity
+#prediction using bootstrap to determine parameters
+#use multiple CPU cores to reduce processing time
 cl <- makePSOCKcluster(detectCores())
 registerDoParallel(cl)
 ptm <- proc.time()
@@ -221,6 +237,7 @@ train_rf <-  train(x_train[, col_index], y_train,
                    )
 proc.time() - ptm
 stopCluster(cl)
+#plot effect of parameters
 ggplot(train_rf)
 train_rf$bestTune
 

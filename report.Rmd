@@ -1,7 +1,7 @@
 ---
 title: "PH125.9x Data Science: Capstone - Casting Defect Detection"
 author: "Nathan Fischer"
-date: "10/15/2020"
+date: "11/10/2020"
 output: pdf_document
 ---
 
@@ -37,9 +37,7 @@ library(knitr)
 
 # Introduction
 
-**describes the dataset and variables, and summarizes the goal of the project and key steps that were performed
-
-Metal casting is a manufacturing process for producing near-net shaped metallic products by pouring molten metal into a shaped, evacuated mold. The molten metal is allowed to solidfy inside the mold, taking the shape produced by the mold. It has a wide range of applications, including jewelry, consumer products, electronic components, and aerospace. Castings are chosen over machined wrought products, such as extrusion or plate, in instances where a complex geometry makes subtractive machining operations prohibitively expensive, or impossible. One of the stigmas associated with castings is that they are perceived to be of lower quality than wrought products, due to the inherent variability associated with the process. An example of this in aviation is 14 CFR 25.621, which requires the use of casting factors for the analysis and certification of transport category aircraft. 
+Metal casting is a manufacturing process for producing near-net shaped metallic products by pouring molten metal into a shaped, evacuated mold. The molten metal is allowed to solidfy inside the mold, taking the shape produced by the mold. It has a wide range of applications, including jewelry, consumer products, electronic components, and aerospace. Castings are chosen over machined wrought products, such as extrusion or plate, in instances where a complex geometry makes subtractive machining operations prohibitively expensive, or impossible. One of the stigmas associated with castings is that they are perceived to be of lower quality than wrought products, due to the inherent variability associated with the process. An example of this in aviation is 14 CFR 25.621, which requires the use of casting factors for the analysis and certification of castings on transport category aircraft. 
 
 Due to this inherent variability, castings are evaluated using destrutive and non-destructive methods during the manufacturing process. This can include visual, penetrant, magnetic particle, or x-ray inspection techniques. The most common non-destructive inspection technique across all industries using castings is a visual inspection. This requires a human operator to purposefully inspect the castings for defects such as cracks, seams, porosity, inclusions, or areas where the mold did not completely fill. This can generally be done successfully when only a few castings require inspection, or the defects are sufficiently large. As the number of castings being inspected increases, or the size of the defect decreases, the probability of detecting these defects using visual inspection decreases. This study proposes the use of a machine learning algorithm to classify images of castings as acceptable or unacceptable - pass or fail - in lieu of human visual inspection.
 
@@ -48,11 +46,9 @@ The images used in this study are taken from the Kaggle dataset ["casting produc
 
 # Analysis
 
-**explains the process and techniques used, including data cleaning, data exploration and visualization, insights gained, and your modeling approaches (you must use at least two different models or algorithms)
-
 ## Importing the Data
 
-The initial step is to download the Kaggle dataset and save it in a folder called _data_. For convenience, a copy of the dataset is saved in the associated ["GitHub repository"](https://github.com/nlfischer195/casting-defect). The dataset has already been split into _test_ and _train_ folders, with images placed in either the _def_front_ or _ok_front_ sub-folders. To obtain an understanding of a typical image in the dataset, the following code was used:
+The initial step is to download the Kaggle dataset and save it in a folder called _data_. For convenience, a copy of the dataset is saved in the associated ["GitHub repository"](https://github.com/nlfischer195/casting-defect). The dataset has already been split into _test_ and _train_ folders by the originator, with images placed in either the _def_front_ or _ok_front_ sub-folders. To obtain an understanding of a typical image in the dataset, the following code was used:
 
 ```{r}
 image <- load.image("data/test/ok_front/cast_ok_0_10.jpeg")
@@ -121,9 +117,11 @@ table(y_train)
 
 Importing the data appears to be successful. The number of columns in x_train_pass, x_train_fail, and x_train all match and the number of rows in x_train is the sum of the number of rows in x_train_pass and x_train_fail. The number of rows in x_train also matches the number of rows in y_train, which was correctly imported as a factor with two levels, with the first being "fail" and the second being "pass". The number of "fail" entries in y_train matches the number of rows in x_train_fail and the number of "pass" entries matches the number of rows in x_train_pass.
 
+It is suprising how balanced the dataset is between the "pass" and "fail" conditions. One would expect a profitable foundry to have notably lower instances of unacceptable castings than acceptable castings. Due to this lack of  bias in the dataset, overall accuracy will be used for the initial model selection.
+
 The final check before progressing onto pre-processing is to view an original image and visually compare it to the same image after being imported and resized.
 
-```{r}
+```{r echo=FALSE}
 image <- load.image("data/test/ok_front/cast_ok_0_10.jpeg")
 plot(image, axes=FALSE)
 
@@ -137,11 +135,12 @@ image(new_image[,nrow(new_image):1], axes = FALSE, col = grey(seq(0, 1, length =
 
 It can be seen that the imported version of this image can be identifed as the same impeller, with matching locations of shadowing, except the imported version is a lower resolution image. All of these results provide confidence that the image importing technique used in this study was successful.
 
+
 ## Pre-Processing
 
 Pre-processing is the term used for data transformations performed on the dataset prior to using classification or regression algorithms. Common technniques include centering and scaling the data, entering missing data points, transforming predictors, or creating dummy variables for categorical data. These steps are performed for various reasons, including to improve accuracy, reduce runtime, or even to allow the algorithm to function at all.
 
-For this image-based dataset, a useful pre-processing step is to remove any predictors - columns - in the dataset that have zero or near-zero variance. This correlates to locations in the images which are nearly identical and therefore do not provide any useful data regarding the acceptability of a casting. A plot of the standard deviations of the columns of the training dataset is creatd using the following code.
+For this image-based dataset, a useful pre-processing step is to remove any predictors - columns - in the dataset that have zero or near-zero variance. This correlates to locations in the images which are nearly identical and therefore do not provide any useful data regarding the acceptability of a casting. A plot of the standard deviations of the columns of the training dataset is created using the following code.
 
 ```{r}
 sds <- colSds(x_train)
@@ -187,42 +186,118 @@ fits <- map_df(models, function(model){
 stopCluster(cl)
 ```
 
+To evaluate the results from each of the models, the processing time as well as the minimum, maximum, and average accuracy is compared.
+
+```{r echo=FALSE}
+fits %>% arrange(desc(avg)) %>% kable()
+```
+
+The models with the highest accuracy are Random Forest, k-Nearest Neighbor, eXtreme Gradient Boosting, and Stochastic Gradient Boosting. Based on the high accuracy and low processing time, Stochastic Gradient Boosting and k-Nearest Neighbors were selected for parameter optimization.
 
 
 ## Stochastic Gradient Boosting Model
 
+The first model to be optimized is Stochastic Gradient Boosting, which includes the tuning parameters n.trees, interaction.depth, shrinkage, and n.minobsinnode. To prevent overfitting, 10-fold cross validation using the bootstrap method is used. 
+
+Another change from the process used for model selection is that accuracy will not be used to optimize parameters or to select the optimal model. This is due to the differences in costs associated with the model correctly or incorrectly determining a "pass" or "fail" in this application. It is far more costly, in terms of revenue, reputation, etc, for a true "fail" to be predicted as "pass"and sent to the customer, than it is for a true "pass" to be predicted as "fail" and scrapped. Because of this, a method of evaluating performance other than accuracy is needed. Since "fail" comes before "pass" in the alphabet, "fail" is considered the positive outcome in **confusionMatrix**, so maximizing sensitivity will be the objective of this investigation.
+
+The following code is used to fit the model to the training dataset.
+
+```{r}
+cl <- makePSOCKcluster(detectCores())
+registerDoParallel(cl)
+set.seed(1, sample.kind = "Rounding")
+control <- trainControl(method = "boot", number = 10, classProbs=TRUE, summaryFunction = twoClassSummary)
+tune <- expand.grid(interaction.depth=c(3,5,7), n.trees=c(100,500), shrinkage=c(0.1), n.minobsinnode=10)
+ptm <- proc.time()
+train_gbm <- train(x_train[, col_index], y_train,
+                   method = "gbm", 
+                   metric = "ROC",
+                   tuneGrid = tune,
+                   trControl = control)
+proc.time() - ptm
+stopCluster(cl)
+ggplot(train_gbm)
+train_gbm$bestTune %>% kable()
+```
+
+Looking at the selected optimal parameters, the maximum number of trees (n.trees) and interaction depth (interaction.depth) were found to be optimal. It is likely that increaseing these values could improve prediction results at the cost of increased processing time.
 
 
 ## K-Nearest Neighbors Model
 
+The next model to be optimized is k-Nearest Neighbors, which includes a single tuning parameter, k. Once again, 10-fold cross validation using the bootstrap method is used to select the optimal k value.
 
-## Random Forest Model
+The following code is used to fit the model to the training dataset.
+
+```{r}
+cl <- makePSOCKcluster(detectCores())
+registerDoParallel(cl)
+ptm <- proc.time()
+set.seed(1, sample.kind = "Rounding")
+control <- trainControl(method = "boot", number = 10, classProbs=TRUE, summaryFunction = twoClassSummary)
+train_knn <- train(x_train[, col_index], y_train,
+                   method = "knn", 
+                   metric = "ROC",
+                   tuneGrid = data.frame(k = c(7,11,15)),
+                   trControl = control)
+proc.time() - ptm
+stopCluster(cl)
+ggplot(train_knn)
+train_knn$bestTune %>% kable()
+```
+
+The results show that a lower value of k, or fewer neighbors using in averaging, results in improved performance. Due to the risk of over-training, the allowed number of neighbors will not be reduced further. In a dataset such as this, with a large number of predictor variables, it is highly likely that each set of predictors (rows) are unique values. Because of this, prediction results would be maximized with k = 1, where the estimate in the training set is determined by the corresponding output for that row. If the rows are unique, cross validation may not be effective in preventing over-training. While performance on the training set may be high, the performance on the test set may be impaired.
 
 
 # Results
 
-**presents the modeling results and discusses the model performance
+As a final analysis of the two models, the trained and optimized models are used to predict the outcome for the test dataset. As stated earlier, sensitivity is the primary performance metric in this situation, as allowing unacceptable product to be sent to the customer has a higher cost than having acceptable product scrapped. In addition to sensitvity, the accuracy, and $F_1$-score (balanced accuracy) are compared.
+
+For the Stochastic Gradient Boosting model, the following code was used to make predictions on the test dataset.
+
+```{r}
+y_hat_gbm <- predict(train_gbm, 
+                     x_test[, col_index]
+                     )
+cm_gbm <- confusionMatrix(data = y_hat_gbm, reference = y_test)
+results <- tibble(Method="GBM",
+                  Sensitivity = cm_gbm$byClass["Sensitivity"],
+                  F1 = cm_gbm$byClass["F1"],
+                  Accuracy = cm_gbm$overall["Accuracy"]
+                  )
+```
+
+For the k-Nearest Neighbors model, the following code was used to make predictions on the test dataset.
+
+```{r}
+y_hat_knn <- predict(train_knn, 
+                     x_test[, col_index]
+)
+cm_knn <- confusionMatrix(data = y_hat_knn, reference = y_test)
+results <- bind_rows(results,
+                     tibble(Method="KNN",
+                            Sensitivity = cm_knn$byClass["Sensitivity"],
+                            F1 = cm_knn$byClass["F1"],
+                            Accuracy = cm_knn$overall["Accuracy"]
+                            )
+                     )
+```
+
+The results table contains the performance metrics necessary to evaluate the performance of the two models.
+
+```{r echo=FALSE}
+results %>% kable()
+```
+
+Across all performance metrics - sensitivity, $F_1$-score, and accuracy - the Stochastic Gradient Boosting model provided superior performance, with sensitivy approaching 99%. 
+
 
 # Conclusion
 
-** brief summary of the report, its potential impact, its limitations, and future work
+The goal of this investigation was to create a machine learning model that could accurately predict the acceptability or rejection of a submersible pump impeller casting based on images. After successfully importing the images and converting them into a format suitable for machine learning algorithms, multiple classification models were evaluated based on accuracy and computation time. From this, Stochastic Gradient Boosting and k-Nearest Neighbors were selected for parameter optimization. With sensitivity as the primary performance metric, optimized models were created and used to make predictions on the test dataset, which was not used for model optimization. Comparing the two optimized models, the Stochastic Gradient Boosting model proved to be superior, with sensitivity approaching 99%.
 
-## R Markdown
+While this investigation was able to achieve high performance, there are limitations that will curb its practical usefulness. This model is only applicable to a single casting design with a particular setup for taking images. Images of the same castings taken from different orientations with different lighting or working distances will likely have impaired performance compared to this test case. This model will also not likely create correct predictions on images of other castings produced at the foundry or other submersible pump impeller models, as they were not part of the training dataset.
 
-This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+Performance for the current Stochastic Gradient Boosting could be marginally improved by increasing the maximum number of trees and the interaction depth, with the associated trade-off of increased computational time. Other potential future work includes training optimized models using Random Forest and eXtreme Gradient Boosting methods. Both of these algorithms had high accuracy numbers during model selection, but were not used due to their long computational time. With these optimized models, an ensemble of the four models could also be evaluated for increased peformance. More advanced models, such as Keras and Tensorflow could also be investigated for applicability.
 
-When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
-
-```{r cars}
-summary(cars)
-```
-
-## Including Plots
-
-You can also embed plots, for example:
-
-```{r pressure, echo=FALSE}
-plot(pressure)
-```
-
-Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
