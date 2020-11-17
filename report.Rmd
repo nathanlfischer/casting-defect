@@ -1,8 +1,9 @@
 ---
 title: "PH125.9x Data Science: Capstone - Casting Defect Detection"
 author: "Nathan Fischer"
-date: "11/10/2020"
-output: pdf_document
+date: "11/14/2020"
+output: 
+  pdf_document
 ---
 
 ```{r setup, include=FALSE}
@@ -54,10 +55,10 @@ The initial step is to download the Kaggle dataset and save it in a folder calle
 image <- load.image("data/test/ok_front/cast_ok_0_10.jpeg")
 dim(image)
 image
-plot(image, axes = false)
+plot(image, axes = FALSE)
 ```
 
-From this, it is discovered that the images are 300 x 300 pixel images in color of the impeller casting. It is suprising that the image that three color channels (RGB), as the image appears to be greyscale.
+From this, it is discovered that the images are 300 x 300 pixel images in color of the impeller casting. It is suprising that the image has three color channels (RGB), as the image appears to be greyscale.
 
 To import these images, a function was developed to create a list of all images in a particular folder, convert each image into greyscale, and then scale down each image to 10% of the original resolution, that is, 30 x 30 pixels instead of the original 300 x 300 pixels, for ease of modeling. Each image is converted into a row of numeric values between 0 and 1 for each pixel in the image. Each row is then added to a matrix, where each row represents a separate image in the dataset.
 
@@ -121,7 +122,7 @@ It is suprising how balanced the dataset is between the "pass" and "fail" condit
 
 The final check before progressing onto pre-processing is to view an original image and visually compare it to the same image after being imported and resized.
 
-```{r echo=FALSE}
+```{r echo=FALSE, fig.show="hold", out.width="50%"}
 image <- load.image("data/test/ok_front/cast_ok_0_10.jpeg")
 plot(image, axes=FALSE)
 
@@ -142,14 +143,14 @@ Pre-processing is the term used for data transformations performed on the datase
 
 For this image-based dataset, a useful pre-processing step is to remove any predictors - columns - in the dataset that have zero or near-zero variance. This correlates to locations in the images which are nearly identical and therefore do not provide any useful data regarding the acceptability of a casting. A plot of the standard deviations of the columns of the training dataset is created using the following code.
 
-```{r}
+```{r out.width = "75%"}
 sds <- colSds(x_train)
 qplot(sds, bins = 256, color = I("black"))
 ```
 
 Visually, there does not appear to be any predictors with near zero variance. To verify this, the **nearZeroVar** function is used, with an image created to show the locations in the image dataset identified as having near zero variance.
 
-```{r}
+```{r out.width = "75%"}
 nzv <- nearZeroVar(x_train)
 image(matrix(1:ncol(x_train) %in% nzv, image_dim, image_dim))
 col_index <- setdiff(1:ncol(x_train), nzv)
@@ -170,18 +171,22 @@ colnames(x_test) <- colnames(x_train)
 
 To select which models to use for parameter optimization, several common models will be fit to the dataset using default parameters. This will include Naive Bayes, Quadratic Discriminant Analysis, Linear Discriminant Analysis, Stochastic Gradient Boosting, k-Nearest Neighbors, Random Forest, and eXtreme Gradient Boosting. To minimize processing time, two-fold cross validation will be used.
 
-```{r}
+```{r message=FALSE, warning=FALSE, error=FALSE, echo=TRUE, results='hide'}
 models <- c("naive_bayes","qda","lda","gbm","knn","rf","xgbDART")
 set.seed(1, sample.kind = "Rounding")
 control <- trainControl(method = "cv", number = 2, p = 0.8)
 cl <- makePSOCKcluster(detectCores())
 registerDoParallel(cl)
 fits <- map_df(models, function(model){ 
-  print(model)
   ptm <- proc.time()
   fit<-train(x = x_train[, col_index],y = y_train, method = model, trControl = control)
   ptm <- proc.time() - ptm
-  tibble(model=model, time=ptm[[3]], min=min(fit$results$Accuracy),max=max(fit$results$Accuracy),avg=mean(fit$results$Accuracy))
+  tibble(model=model, 
+         time=ptm[[3]], 
+         min=min(fit$results$Accuracy),
+         max=max(fit$results$Accuracy),
+         avg=mean(fit$results$Accuracy)
+         )
 }) 
 stopCluster(cl)
 ```
@@ -199,29 +204,34 @@ The models with the highest accuracy are Random Forest, k-Nearest Neighbor, eXtr
 
 The first model to be optimized is Stochastic Gradient Boosting, which includes the tuning parameters n.trees, interaction.depth, shrinkage, and n.minobsinnode. To prevent overfitting, 10-fold cross validation using the bootstrap method is used. 
 
-Another change from the process used for model selection is that accuracy will not be used to optimize parameters or to select the optimal model. This is due to the differences in costs associated with the model correctly or incorrectly determining a "pass" or "fail" in this application. It is far more costly, in terms of revenue, reputation, etc, for a true "fail" to be predicted as "pass"and sent to the customer, than it is for a true "pass" to be predicted as "fail" and scrapped. Because of this, a method of evaluating performance other than accuracy is needed. Since "fail" comes before "pass" in the alphabet, "fail" is considered the positive outcome in **confusionMatrix**, so maximizing sensitivity will be the objective of this investigation.
+Another change from the process used for model selection is that accuracy will not be used to optimize parameters or to select the optimal model. This is due to the differences in costs associated with the model correctly or incorrectly determining a "pass" or "fail" in this application. It is far more costly, in terms of revenue, reputation, etc, for a true "fail" to be predicted as "pass"and sent to the customer, than it is for a true "pass" to be predicted as "fail" and scrapped. Because of this, a method of evaluating performance other than accuracy is needed. Since "fail" comes before "pass" in the alphabet, "fail" is considered the positive outcome in **confusionMatrix**, so maximizing sensitivity will be the objective of this investigation. This can be implemented on a binary classification problem by changing summaryFunction to twoClassSummary and metric to ROC. The best model will then be selected which maximizes the area under the ROC curve, a trade-off between sensitivity and specificity.
 
 The following code is used to fit the model to the training dataset.
 
-```{r}
+```{r message=FALSE, warning=FALSE, error=FALSE, echo=TRUE, results='hide'}
 cl <- makePSOCKcluster(detectCores())
 registerDoParallel(cl)
 set.seed(1, sample.kind = "Rounding")
-control <- trainControl(method = "boot", number = 10, classProbs=TRUE, summaryFunction = twoClassSummary)
-tune <- expand.grid(interaction.depth=c(3,5,7), n.trees=c(100,500), shrinkage=c(0.1), n.minobsinnode=10)
+control <- trainControl(method = "boot", number = 10, classProbs=TRUE, 
+                        summaryFunction = twoClassSummary)
+tune <- expand.grid(interaction.depth=c(3,5,7), n.trees=c(100,500), 
+                    shrinkage=c(0.1), n.minobsinnode=10)
 ptm <- proc.time()
 train_gbm <- train(x_train[, col_index], y_train,
                    method = "gbm", 
                    metric = "ROC",
                    tuneGrid = tune,
                    trControl = control)
-proc.time() - ptm
 stopCluster(cl)
+```
+```{r out.width = "75%"}
 ggplot(train_gbm)
+```
+```{r}
 train_gbm$bestTune %>% kable()
 ```
 
-Looking at the selected optimal parameters, the maximum number of trees (n.trees) and interaction depth (interaction.depth) were found to be optimal. It is likely that increaseing these values could improve prediction results at the cost of increased processing time.
+Looking at the selected optimal parameters, the maximum number of trees (n.trees) and interaction depth (interaction.depth) were found to be optimal, with the area under the ROC curve approaching 0.995. It is likely that increaseing these values could improve prediction results at the cost of increased processing time.
 
 
 ## K-Nearest Neighbors Model
@@ -230,24 +240,28 @@ The next model to be optimized is k-Nearest Neighbors, which includes a single t
 
 The following code is used to fit the model to the training dataset.
 
-```{r}
+```{r message=FALSE, warning=FALSE, error=FALSE}
 cl <- makePSOCKcluster(detectCores())
 registerDoParallel(cl)
 ptm <- proc.time()
 set.seed(1, sample.kind = "Rounding")
-control <- trainControl(method = "boot", number = 10, classProbs=TRUE, summaryFunction = twoClassSummary)
+control <- trainControl(method = "boot", number = 10, classProbs=TRUE, 
+                        summaryFunction = twoClassSummary)
 train_knn <- train(x_train[, col_index], y_train,
                    method = "knn", 
                    metric = "ROC",
                    tuneGrid = data.frame(k = c(7,11,15)),
                    trControl = control)
-proc.time() - ptm
 stopCluster(cl)
+```
+```{r out.width = "75%"}
 ggplot(train_knn)
+```
+```{r}
 train_knn$bestTune %>% kable()
 ```
 
-The results show that a lower value of k, or fewer neighbors using in averaging, results in improved performance. Due to the risk of over-training, the allowed number of neighbors will not be reduced further. In a dataset such as this, with a large number of predictor variables, it is highly likely that each set of predictors (rows) are unique values. Because of this, prediction results would be maximized with k = 1, where the estimate in the training set is determined by the corresponding output for that row. If the rows are unique, cross validation may not be effective in preventing over-training. While performance on the training set may be high, the performance on the test set may be impaired.
+The results show that the optimal number of neighbors, k, is around 11, with an area under the ROC curve slightly over 0.99. This is lower than the results from Stochastic Gradient Boosting, but is still an excellent initial result. It is encouraging that the results did not show improved performance as the value of k decreased. If the predicted results had been maximized with k = 1, where the estimate in the training set is determined by the corresponding output for that row, it is evidence for over-training and the model would likely not have performed well on the test dataset.
 
 
 # Results
@@ -295,9 +309,9 @@ Across all performance metrics - sensitivity, $F_1$-score, and accuracy - the St
 
 # Conclusion
 
-The goal of this investigation was to create a machine learning model that could accurately predict the acceptability or rejection of a submersible pump impeller casting based on images. After successfully importing the images and converting them into a format suitable for machine learning algorithms, multiple classification models were evaluated based on accuracy and computation time. From this, Stochastic Gradient Boosting and k-Nearest Neighbors were selected for parameter optimization. With sensitivity as the primary performance metric, optimized models were created and used to make predictions on the test dataset, which was not used for model optimization. Comparing the two optimized models, the Stochastic Gradient Boosting model proved to be superior, with sensitivity approaching 99%.
+The goal of this investigation was to create a machine learning model that could accurately predict the acceptability or rejection of a submersible pump impeller casting based on images. After successfully importing the images and converting them into a format suitable for machine learning algorithms, multiple classification models were evaluated based on accuracy and computation time. From this, Stochastic Gradient Boosting and k-Nearest Neighbors were selected for parameter optimization. With area under the ROC curve as the primary performance metric, optimized models were created and used to make predictions on the test dataset, which was not used for model optimization. Comparing the two optimized models, the Stochastic Gradient Boosting model proved to be superior, with sensitivity approaching 99%.
 
 While this investigation was able to achieve high performance, there are limitations that will curb its practical usefulness. This model is only applicable to a single casting design with a particular setup for taking images. Images of the same castings taken from different orientations with different lighting or working distances will likely have impaired performance compared to this test case. This model will also not likely create correct predictions on images of other castings produced at the foundry or other submersible pump impeller models, as they were not part of the training dataset.
 
-Performance for the current Stochastic Gradient Boosting could be marginally improved by increasing the maximum number of trees and the interaction depth, with the associated trade-off of increased computational time. Other potential future work includes training optimized models using Random Forest and eXtreme Gradient Boosting methods. Both of these algorithms had high accuracy numbers during model selection, but were not used due to their long computational time. With these optimized models, an ensemble of the four models could also be evaluated for increased peformance. More advanced models, such as Keras and Tensorflow could also be investigated for applicability.
+Performance for the current Stochastic Gradient Boosting could be marginally improved by increasing the maximum number of trees and the interaction depth, with the associated trade-off of increased computational time. Other potential future work includes training optimized models using Random Forest and eXtreme Gradient Boosting methods. Both of these algorithms had high accuracy numbers during model selection, but were not used due to their long computational time. With these optimized models, an ensemble of the four models could also be evaluated for increased peformance. More advanced methodologies, such as Keras and Tensorflow could also be investigated for applicability.
 

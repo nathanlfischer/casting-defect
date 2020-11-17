@@ -33,7 +33,7 @@ library(knitr)
 image <- load.image("data/test/ok_front/cast_ok_0_10.jpeg")
 dim(image)
 image
-plot(image, axes = false)
+plot(image, axes = FALSE)
 grey_image <- grayscale(image)
 grey_image_small <- imresize(grey_image,scale=0.10)
 image_array <- as.numeric(grey_image_small)
@@ -98,8 +98,6 @@ new_image <- t(new_image)
 par(mar = rep(0, 4),pty="s")
 image(new_image[,nrow(new_image):1], axes = FALSE, col = grey(seq(0, 1, length = 256)))
 plot(image, axes=FALSE)
-
-
 
 ######################### Pre-processing #########################
 #Check columns for zero variability
