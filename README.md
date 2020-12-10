@@ -8,7 +8,7 @@ Captstone project #2 for HarvardX PH125.9x Data Science : Capstone, the final co
 
 code.R is the R script containing the code used for the project. It imports images, peforms the data analysis, creates machine learning models, and calculates accuracy and sensitivity. Written using R version 4.0.2.
 
-report.Rmd is the report written in R Markdown format. Improvements in formatting were made over my capston project #1 (movielens), but it isn't as "crisp" as I would like it to be.
+report.Rmd is the report written in R Markdown format. Improvements in formatting were made over my capstone project #1 [movielens](https://github.com/nlfischer195/movielens), but it isn't as "crisp" as I would like it to be.
 
 report.pdf is the R Markdown report exported as a pdf.
 
